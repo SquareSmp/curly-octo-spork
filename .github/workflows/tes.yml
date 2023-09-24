@@ -30,12 +30,14 @@ jobs:
 
       - name: Install Android SDK
         run: |
-          mkdir android-sdk
-          cd android-sdk
+          sudo apt-get update -y
+          sudo apt-get install -y openjdk-11-jdk
           wget https://dl.google.com/android/repository/commandlinetools-linux-7583922_latest.zip
           unzip commandlinetools-linux-7583922_latest.zip
-          export ANDROID_HOME=$PWD
-          export PATH="$PATH:$ANDROID_HOME/cmdline-tools/tools/bin"
+          mkdir -p $HOME/android-sdk/cmdline-tools
+          mv cmdline-tools $HOME/android-sdk/cmdline-tools/latest
+          export ANDROID_HOME=$HOME/android-sdk
+          export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin"
           yes | sdkmanager --licenses
 
       - name: Set up emulator
