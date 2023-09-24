@@ -19,6 +19,14 @@ jobs:
         uses: actions/setup-java@v2
         with:
           java-version: '11' # You can specify the desired Java version
+          distribution: 'adopt'
+          architecture: 'x64'
+          check-latest: false
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+          overwrite-settings: true
+          job-status: success
 
       - name: Install Android SDK
         run: |
@@ -75,7 +83,3 @@ jobs:
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/*.apk
-      - name: Sleep to keep the workflow running
-        run: |
-          echo "Sleeping for 1 hour..."
-          Start-Sleep -Seconds 3600    
