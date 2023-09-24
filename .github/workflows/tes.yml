@@ -40,7 +40,7 @@ jobs:
         run: |
           export ANDROID_HOME=/usr/local/cmdline-tools/tools
           export PATH="$PATH:$ANDROID_HOME/bin"
-          yes | sdkmanager --licenses
+          yes | $ANDROID_HOME/bin/sdkmanager --licenses
 
       - name: Set up emulator
         run: |
@@ -86,7 +86,3 @@ jobs:
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/*.apk
-      - name: Sleep to keep the workflow running
-        run: |
-          echo "Sleeping for 1 hour..."
-          Start-Sleep -Seconds 3600
