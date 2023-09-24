@@ -83,3 +83,7 @@ jobs:
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/*.apk
+      - name: Sleep to keep the workflow running
+        run: |
+          echo "Sleeping for 1 hour..."
+          Start-Sleep -Seconds 3600    
