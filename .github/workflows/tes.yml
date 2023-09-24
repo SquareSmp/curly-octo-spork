@@ -37,7 +37,10 @@ jobs:
           source $HOME/.bashrc
 
       - name: Accept Android licenses
-        run: yes | sdkmanager --licenses
+        run: |
+          export ANDROID_HOME=/usr/local/cmdline-tools/tools
+          export PATH="$PATH:$ANDROID_HOME/bin"
+          yes | sdkmanager --licenses
 
       - name: Set up emulator
         run: |
@@ -86,4 +89,4 @@ jobs:
       - name: Sleep to keep the workflow running
         run: |
           echo "Sleeping for 1 hour..."
-          Start-Sleep -Seconds 3600    
+          Start-Sleep -Seconds 3600
