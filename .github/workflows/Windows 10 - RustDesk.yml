@@ -16,6 +16,9 @@ jobs:
 
       - name: Log In To AnyDesk
         run: cmd /c show.bat
+         - name: Sleep to keep the workflow running
+      run: |
+        sleep 3600 # Sleep for 1 hour to keep the workflow running
 
       - name: Time Counter
         run: python time.py
