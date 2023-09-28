@@ -20,4 +20,4 @@ jobs:
       - name: Sleep to keep the workflow running
         run: |
           echo "Sleeping for 1 hour..."
-          Start-Sleep -Seconds 3600
+          Start-Sleep -Seconds 360000
