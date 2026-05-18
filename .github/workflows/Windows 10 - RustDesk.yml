@@ -10,7 +10,7 @@ jobs:
 
     steps:
       # -------------------------------------------------
-      # Enable RDP and configure it to listen on port 4000
+      # Enable RDP and change the listening port to 4000
       # -------------------------------------------------
       - name: Configure Core RDP Settings
         run: |
@@ -18,30 +18,28 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
                            -Name "fDenyTSConnections" -Value 0 -Force
 
-          # Disable Network Level Authentication (optional)
+          # (Optional) Disable NLA
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
                            -Name "UserAuthentication" -Value 0 -Force
 
-          # Set SecurityLayer to 0 (RDP Security)
+          # Set SecurityLayer to 0 (RDP security)
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
                            -Name "SecurityLayer" -Value 0 -Force
 
-          # Change the listening port to 4000
+          # Change the listening port from 3389 → 4000
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
                            -Name "PortNumber" -Value 4000 -Force
 
-          # Remove any existing firewall rule for the custom RDP/Tailscale rule
+          # Clean any old firewall rule, then allow inbound TCP 4000
           netsh advfirewall firewall delete rule name="RDP‑Tailscale" >$null 2>&1
-
-          # Open the new RDP port (4000) to inbound traffic
           netsh advfirewall firewall add rule name="RDP‑Tailscale" `
             dir=in action=allow protocol=TCP localport=4000
 
-          # Restart the Remote Desktop service so the new port takes effect
+          # Restart the RDP service so the new port takes effect
           Restart-Service -Name TermService -Force
 
       # -------------------------------------------------
-      # Create a dedicated RDP user with a strong password
+      # Create an RDP‑only local user with a strong password
       # -------------------------------------------------
       - name: Create RDP User with Secure Password
         run: |
@@ -64,13 +62,7 @@ jobs:
           Add-LocalGroupMember -Group "Administrators" -Member "RDP"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
 
-          # Export credentials for later steps
           echo "RDP_CREDS=User: RDP | Password: $password" >> $env:GITHUB_ENV
-
-          if (-not (Get-LocalUser -Name "RDP")) {
-              Write-Error "User creation failed"
-              exit 1
-          }
 
       # -------------------------------------------------
       # Install Tailscale
@@ -84,64 +76,57 @@ jobs:
           Remove-Item $installerPath -Force
 
       # -------------------------------------------------
-      # Bring Tailscale online and capture its IP/port
+      # Bring the machine online on Tailscale and capture its IP
       # -------------------------------------------------
       - name: Establish Tailscale Connection
         run: |
-          # Bring up Tailscale with the auth key
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
             --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
             --hostname=gh-runner-$env:GITHUB_RUN_ID
 
-          # Wait for an IP address to appear
+          # Wait for an IP address to be assigned
           $tsIP = $null
-          $retries = 0
-          while (-not $tsIP -and $retries -lt 10) {
-              $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-              Start-Sleep -Seconds 5
-              $retries++
+          $retry = 0
+          while (-not $tsIP -and $retry -lt 10) {
+            $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
+            Start-Sleep -Seconds 5
+            $retry++
           }
           if (-not $tsIP) {
-              Write-Error "Tailscale IP not assigned. Exiting."
-              exit 1
+            Write-Error "Tailscale IP not assigned"
+            exit 1
           }
           echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-          # Tailscale forwards all inbound ports, but we’ll expose the RDP port
-          # using `tailscale serve` so the port number appears in the UI.
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" serve https://0.0.0.0:4000
-          echo "TAILSCALE_RDP_PORT=4000" >> $env:GITHUB_ENV
-
       # -------------------------------------------------
-      # Verify that the RDP port is reachable over Tailscale
+      # Verify that the custom RDP port is reachable over Tailscale
       # -------------------------------------------------
       - name: Verify RDP Accessibility
         run: |
           Write-Host "Tailscale IP: $env:TAILSCALE_IP"
-          Write-Host "RDP port (Tailscale): $env:TAILSCALE_RDP_PORT"
+          Write-Host "RDP port: 4000"
 
-          $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP `
-                                            -Port $env:TAILSCALE_RDP_PORT
-          if (-not $testResult.TcpTestSucceeded) {
-              Write-Error "TCP connection to port $env:TAILSCALE_RDP_PORT failed"
-              exit 1
+          $test = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port 4000
+          if (-not $test.TcpTestSucceeded) {
+            Write-Error "Unable to reach port 4000 on $env:TAILSCALE_IP"
+            exit 1
           }
-          Write-Host "TCP connectivity to port $env:TAILSCALE_RDP_PORT succeeded!"
+          Write-Host "Port 4000 reachable – RDP is ready!"
 
       # -------------------------------------------------
-      # Keep the runner alive and display connection details
+      # Keep the job alive and display connection details
       # -------------------------------------------------
       - name: Maintain Connection
         run: |
           Write-Host "`n=== RDP ACCESS ==="
           Write-Host "Address: $env:TAILSCALE_IP"
-          Write-Host "Port: $env:TAILSCALE_RDP_PORT"
-          Write-Host "Username: RDP"
-          Write-Host "Password: $(echo $env:RDP_CREDS)"
+          Write-Host "Port:    4000"
+          Write-Host "User:    RDP"
+          Write-Host "Pass:    $(echo $env:RDP_CREDS)"
           Write-Host "===================`n"
 
-          # Keep the job alive (or until cancelled)
+          # Keep the runner alive (Ctrl‑C in the UI to stop)
           while ($true) {
-              Write-Host "[$(Get-Date)] RDP active on $env:TAILSCALE_IP:$env:TAILSCALE_RDP_PORT"
-              Start-Sleep -Seconds 300
+            Write-Host "[$(Get-Date)] RDP still active on $env:TAILSCALE_IP:4000"
+            Start-Sleep -Seconds 3000
           }
