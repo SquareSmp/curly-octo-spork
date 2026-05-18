@@ -9,122 +9,120 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-  - name: Configure Core RDP Settings
-    run: |
-      # Enable Remote Desktop and disable Network Level Authentication (if needed)
-      Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' \`
-                         -Name "fDenyTSConnections" -Value 0 -Force
-      Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' \`
-                         -Name "UserAuthentication" -Value 0 -Force
-      Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' \`
-                         -Name "SecurityLayer" -Value 0 -Force
+    - name: Configure Core RDP Settings
+      run: |
+        # Enable Remote Desktop and disable Network Level Authentication (if needed)
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+                           -Name "fDenyTSConnections" -Value 0 -Force
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                           -Name "UserAuthentication" -Value 0 -Force
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                           -Name "SecurityLayer" -Value 0 -Force
 
-      # Change RDP listening port to 4000
-      New-Item -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -ErrorAction SilentlyContinue | Out-Null
-      Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' \`
-                         -Name "PortNumber" -Value 4000 -Type DWord -Force
+        # Change RDP listening port to 4000
+        New-Item -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -ErrorAction SilentlyContinue | Out-Null
+        Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                           -Name "PortNumber" -Value 4000 -Type DWord -Force
 
-      # Remove any existing rule with the same name to avoid duplication
-      netsh advfirewall firewall delete rule name="RDP-Tailscale" || \$null
-      
-      # Allow incoming connections on port 4000
-      netsh advfirewall firewall add rule name="RDP-Tailscale" \`
-        dir=in action=allow protocol=TCP localport=400led"
-          exit 1
-      }
+        # Remove any existing rule with the same name to avoid duplication
+        netsh advfirewall firewall delete rule name="RDP-Tailscale" || $null
+        
+        # Allow incoming connections on port 4000
+        netsh advfirewall firewall add rule name="RDP-Tailscale" `
+          dir=in action=allow protocol=TCP localport=4000
 
-  - name: Install Tailscale
-    run: |
-      \$tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-      \$installerPath = "\$env:TEMP\tailscale.msi"
-      
-      Invoke-WebRequest -Uri \$tsUrl -OutFile \$installerPath
-      Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-      Remove-Item \$installerPath -Force
+    - name: Install Tailscale
+      run: |
+        $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+        $installerPath = "$env:TEMP\tailscale.msi"
+        
+        Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
+        Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
+        Remove-Item $installerPath -Force
 
-  - name: Establish Tailscale Connection
-    run: |
-      # Bring up Tailscale with the provided auth key and set a unique hostname
-      & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE\_AUTH\_KEY }} --hostname=gh-runner-\$env:GITHUB\_RUN\_ID
-      
-      # Wait for Tailscale to assign an IP
-      \$tsIP = \$null
-      \$retries = 0
-      while (-not \$tsIP -and \$retries -lt 12) {
-          \$tsIP = (& "\$env:ProgramFiles\Tailscale\tailscale.exe" ip -4).Trim()
-          if (\$tsIP -and \$tsIP -ne "100.100.100.100") { break }
-          Start-Sleep -Seconds 5
-          \$retries++
-      }
-      
-      if (-not \$tsIP) {
-          Write-Error "Tailscale IP not assigned. Exiting."
-          exit 1
-      }
-      echo "TAILSCALE\_IP=\$tsIP" >> \$env:GITHUB\_ENV
+    - name: Establish Tailscale Connection
+      run: |
+        # Bring up Tailscale with the provided auth key and set a unique hostname
+        & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-$env:GITHUB_RUN_ID
+        
+        # Wait for Tailscale to assign an IP
+        $tsIP = $null
+        $retries = 0
+        while (-not $tsIP -and $retries -lt 12) {
+            $tsIP = (& "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4).Trim()
+            if ($tsIP -and $tsIP -ne "100.100.100.100") { break }
+            Start-Sleep -Seconds 5
+            $retries++
+        }
+        
+        if (-not $tsIP) {
+            Write-Error "Tailscale IP not assigned. Exiting."
+            exit 1
+        }
+        echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
 
-  - name: Expose RDP via Tailscale (tailscale serve) and capture port
-    run: |
-      # Use tailscale serve to expose local TCP port 4000 as service name "RDP"
-      # This requires tailscale 1.18+ which supports "tailscale serve tcp:NAME=host:port"
-      \$serveCmd = "\$env:ProgramFiles\Tailscale\tailscale.exe serve tcp:RDP=localhost:4000"
-      Write-Host "Running: \$serveCmd"
-      Start-Process -FilePath "\$env:ProgramFiles\Tailscale\tailscale.exe" -ArgumentList "serve", "tcp:RDP=localhost:4000" -NoNewWindow
+    - name: Expose RDP via Tailscale (tailscale serve) and capture port
+      run: |
+        # Use tailscale serve to expose local TCP port 4000 as service name "RDP"
+        # This requires tailscale 1.18+ which supports "tailscale serve tcp:NAME=host:port"
+        $serveCmd = "$env:ProgramFiles\Tailscale\tailscale.exe serve tcp:RDP=localhost:4000"
+        Write-Host "Running: $serveCmd"
+        Start-Process -FilePath "$env:ProgramFiles\Tailscale\tailscale.exe" -ArgumentList "serve", "tcp:RDP=localhost:4000" -NoNewWindow
 
-      # Give Tailscale a moment to register the service
-      Start-Sleep -Seconds 5
+        # Give Tailscale a moment to register the service
+        Start-Sleep -Seconds 5
 
-      # Query the local tailscaled state to find the mapped port for service name "RDP"
-      # Use 'tailscale status --json' and parse the ServiceMap or port info if present
-      \$statusJson = & "\$env:ProgramFiles\Tailscale\tailscale.exe" status --json 2>\$null
-      if (-not \$statusJson) {
-          Write-Host "No status JSON returned; setting TAILSCALE\_PORT=4000 as fallback"
-          echo "TAILSCALE\_PORT=4000" >> \$env:GITHUB\_ENV
-      } else {
-          try {
-              \$status = \$statusJson | ConvertFrom-Json
-              \$port = \$null
-              # Look for Self.Services or Serve mappings depending on tailscale output
-              if (\$status.Self -and \$status.Self.Services) {
-                  foreach (\$svc in \$status.Self.Services) {
-                      if (\$svc -like "RDP\*") {
-                          # svc might be "RDP:port" or "tcp:RDP=100.xx.yy.zz:port"
-                          if ($svc -match ":(\d+)$") { \$port = \$Matches[1]; break }
-                      }
-                  }
-              }
-              if (-not \$port) { \$port = 4000 } # fallback
-              echo "TAILSCALE\_PORT=\$port" >> \$env:GITHUB\_ENV
-          } catch {
-              Write-Host "Failed to parse tailscale status; using fallback port 4000"
-              echo "TAILSCALE\_PORT=4000" >> \$env:GITHUB\_ENV
-          }
-      }
+        # Query the local tailscaled state to find the mapped port for service name "RDP"
+        # Use 'tailscale status --json' and parse the ServiceMap or port info if present
+        $statusJson = & "$env:ProgramFiles\Tailscale\tailscale.exe" status --json 2>$null
+        if (-not $statusJson) {
+            Write-Host "No status JSON returned; setting TAILSCALE_PORT=4000 as fallback"
+            echo "TAILSCALE_PORT=4000" >> $env:GITHUB_ENV
+        } else {
+            try {
+                $status = $statusJson | ConvertFrom-Json
+                $port = $null
+                # Look for Self.Services or Serve mappings depending on tailscale output
+                if ($status.Self -and $status.Self.Services) {
+                    foreach ($svc in $status.Self.Services) {
+                        if ($svc -like "RDP*") {
+                            # svc might be "RDP:port" or "tcp:RDP=100.xx.yy.zz:port"
+                            if ($svc -match ":(\d+)$") { $port = $Matches[1]; break }
+                        }
+                    }
+                }
+                if (-not $port) { $port = 4000 } # fallback
+                echo "TAILSCALE_PORT=$port" >> $env:GITHUB_ENV
+            } catch {
+                Write-Host "Failed to parse tailscale status; using fallback port 4000"
+                echo "TAILSCALE_PORT=4000" >> $env:GITHUB_ENV
+            }
+        }
 
-  - name: Verify RDP Accessibility
-    run: |
-      Write-Host "Tailscale IP: \$env:TAILSCALE\_IP"
-      Write-Host "Tailscale Port (reported): \$env:TAILSCALE\_PORT"
-      
-      # Test connectivity using Test-NetConnection against the Tailscale IP on the advertised port
-      \$portToTest = if (\$env:TAILSCALE\_PORT) { [int]\$env:TAILSCALE\_PORT } else { 4000 }
-      \$testResult = Test-NetConnection -ComputerName \$env:TAILSCALE\_IP -Port \$portToTest -InformationLevel "Detailed"
-      if (-not \$testResult.TcpTestSucceeded) {
-          Write-Error "TCP connection to RDP port \$portToTest failed"
-          exit 1
-      }
-      Write-Host "TCP connectivity successful!"
+    - name: Verify RDP Accessibility
+      run: |
+        Write-Host "Tailscale IP: $env:TAILSCALE_IP"
+        Write-Host "Tailscale Port (reported): $env:TAILSCALE_PORT"
+        
+        # Test connectivity using Test-NetConnection against the Tailscale IP on the advertised port
+        $portToTest = if ($env:TAILSCALE_PORT) { [int]$env:TAILSCALE_PORT } else { 4000 }
+        $testResult = Test-NetConnection -ComputerName $env:TAILSCALE_IP -Port $portToTest -InformationLevel "Detailed"
+        if (-not $testResult.TcpTestSucceeded) {
+            Write-Error "TCP connection to RDP port $portToTest failed"
+            exit 1
+        }
+        Write-Host "TCP connectivity successful!"
 
-  - name: Maintain Connection
-    run: |
-      Write-Host "\`n=== RDP ACCESS ==="
-      Write-Host "Address: \$env:TAILSCALE\_IP\`:\$env:TAILSCALE\_PORT"
-      Write-Host "Username: RDP"
-      Write-Host "Password: \$(echo \$env:RDP\_CREDS)"
-      Write-Host "==================\`n"
-      
-      # Keep runner active indefinitely (or until manually cancelled)
-      while (\$true) {
-          Write-Host "[\$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"
-          Start-Sleep -Seconds 300
-      }
+    - name: Maintain Connection
+      run: |
+        Write-Host "`n=== RDP ACCESS ==="
+        Write-Host "Address: $env:TAILSCALE_IP`:$env:TAILSCALE_PORT"
+        Write-Host "Username: RDP"
+        Write-Host "Password: $(echo $env:RDP_CREDS)"
+        Write-Host "==================`n"
+        
+        # Keep runner active indefinitely (or until manually cancelled)
+        while ($true) {
+            Write-Host "[$(Get-Date)] RDP Active - Use Ctrl+C in workflow to terminate"
+            Start-Sleep -Seconds 300
+        }
