@@ -1,0 +1,110 @@
+name: Infinite Minecraft Server
+
+on:
+  workflow_dispatch:
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 43200 # 30 days max GitHub allows
+
+    env:
+      PLAYIT_SECRET: ${{ secrets.PLAYIT_SECRET }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+
+          # Java 25
+          sudo apt install -y wget curl screen unzip rsync python3 python3-pip
+
+          wget https://download.oracle.com/java/25/latest/jdk-25_linux-x64_bin.deb
+          sudo apt install -y ./jdk-25_linux-x64_bin.deb
+
+          # Hugging Face CLI
+          pip install -U "huggingface_hub[cli]"
+
+      - name: Setup server directory
+        run: |
+          mkdir -p random
+          cd random
+
+          # Download Paper server
+          curl -L -o random.jar \
+            https://fill-data.papermc.io/v1/objects/830d4eb5c15cbd802a9ec9f2f54eaaaeb9511958339aec983fd0c88bad21d940/paper-26.1.2-64.jar
+
+          # Download playit
+          curl -L -o playit-linux-amd64 \
+            https://github.com/playit-cloud/playit-agent/releases/download/v0.15.23/playit-linux-amd64
+
+          chmod +x playit-linux-amd64
+
+          # Accept EULA
+          echo "eula=true" > eula.txt
+
+          # Offline mode
+          cat > server.properties <<EOF
+          online-mode=false
+          EOF
+
+          mkdir -p plugins
+
+      - name: Login to Hugging Face
+        run: |
+          hf auth login --token "$HF_TOKEN"
+
+      - name: Restore files from HF bucket
+        run: |
+          mkdir -p hf_restore
+
+          hf download djjzbx/random \
+            --repo-type dataset \
+            --local-dir hf_restore || true
+
+          rsync -av hf_restore/ random/ || true
+
+      - name: Start background sync loop
+        run: |
+          cat > sync.sh <<'EOF'
+          #!/bin/bash
+
+          while true
+          do
+            echo "Syncing to HF bucket..."
+
+            hf upload-large-folder djjzbx/random ./random \
+              --repo-type dataset || true
+
+            sleep 120
+          done
+          EOF
+
+          chmod +x sync.sh
+
+          nohup ./sync.sh > sync.log 2>&1 &
+
+      - name: Start Playit tunnel
+        working-directory: random
+        run: |
+          nohup ./playit-linux-amd64 \
+            --secret "$PLAYIT_SECRET" \
+            --platform_docker \
+            > playit.log 2>&1 &
+
+      - name: Start Minecraft server
+        working-directory: random
+        run: |
+          java -Xmx12G -Xms2G -jar random.jar nogui
+
+      - name: Keep workflow alive
+        if: always()
+        run: |
+          while true
+          do
+            sleep 300
+          done
