@@ -2,11 +2,16 @@ name: Infinite Minecraft Server
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   server:
     runs-on: ubuntu-latest
-    timeout-minutes: 43200 # 30 days max GitHub allows
+
+    # Max GitHub Actions limit
+    timeout-minutes: 43200
 
     env:
       PLAYIT_SECRET: ${{ secrets.PLAYIT_SECRET }}
@@ -16,35 +21,56 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      # ------------------------------------------------------------
+      # Install Temurin Java 25
+      # ------------------------------------------------------------
+      - name: Setup Eclipse Temurin JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Verify Java
+        run: |
+          java -version
+          javac -version
+
+      # ------------------------------------------------------------
+      # Install tools
+      # ------------------------------------------------------------
       - name: Install dependencies
         run: |
           sudo apt update
+          sudo apt install -y curl wget screen rsync python3-pip
 
-          # Java 25
-          sudo apt install -y wget curl screen unzip rsync python3 python3-pip
+          pip install -U huggingface_hub
 
-          wget https://download.oracle.com/java/25/latest/jdk-25_linux-x64_bin.deb
-          sudo apt install -y ./jdk-25_linux-x64_bin.deb
+      # ------------------------------------------------------------
+      # Login to Hugging Face
+      # ------------------------------------------------------------
+      - name: HF Login
+        run: |
+          hf auth login --token "$HF_TOKEN"
 
-          # Hugging Face CLI
-          pip install -U "huggingface_hub[cli]"
-
-      - name: Setup server directory
+      # ------------------------------------------------------------
+      # Create server dir
+      # ------------------------------------------------------------
+      - name: Setup server files
         run: |
           mkdir -p random
           cd random
 
-          # Download Paper server
+          # Download Paper
           curl -L -o random.jar \
             https://fill-data.papermc.io/v1/objects/830d4eb5c15cbd802a9ec9f2f54eaaaeb9511958339aec983fd0c88bad21d940/paper-26.1.2-64.jar
 
-          # Download playit
+          # Download Playit
           curl -L -o playit-linux-amd64 \
             https://github.com/playit-cloud/playit-agent/releases/download/v0.15.23/playit-linux-amd64
 
           chmod +x playit-linux-amd64
 
-          # Accept EULA
+          # EULA
           echo "eula=true" > eula.txt
 
           # Offline mode
@@ -54,21 +80,19 @@ jobs:
 
           mkdir -p plugins
 
-      - name: Login to Hugging Face
+      # ------------------------------------------------------------
+      # Restore from HF bucket
+      # ------------------------------------------------------------
+      - name: Restore bucket files
         run: |
-          hf auth login --token "$HF_TOKEN"
+          hf buckets sync \
+            hf://buckets/djjzbx/random \
+            ./random || true
 
-      - name: Restore files from HF bucket
-        run: |
-          mkdir -p hf_restore
-
-          hf download djjzbx/random \
-            --repo-type dataset \
-            --local-dir hf_restore || true
-
-          rsync -av hf_restore/ random/ || true
-
-      - name: Start background sync loop
+      # ------------------------------------------------------------
+      # Start auto-sync loop
+      # ------------------------------------------------------------
+      - name: Start sync daemon
         run: |
           cat > sync.sh <<'EOF'
           #!/bin/bash
@@ -77,8 +101,9 @@ jobs:
           do
             echo "Syncing to HF bucket..."
 
-            hf upload-large-folder djjzbx/random ./random \
-              --repo-type dataset || true
+            hf buckets sync \
+              ./random \
+              hf://buckets/djjzbx/random
 
             sleep 120
           done
@@ -88,7 +113,10 @@ jobs:
 
           nohup ./sync.sh > sync.log 2>&1 &
 
-      - name: Start Playit tunnel
+      # ------------------------------------------------------------
+      # Start Playit
+      # ------------------------------------------------------------
+      - name: Start Playit
         working-directory: random
         run: |
           nohup ./playit-linux-amd64 \
@@ -96,15 +124,10 @@ jobs:
             --platform_docker \
             > playit.log 2>&1 &
 
-      - name: Start Minecraft server
+      # ------------------------------------------------------------
+      # Start Minecraft server
+      # ------------------------------------------------------------
+      - name: Start Minecraft
         working-directory: random
         run: |
           java -Xmx12G -Xms2G -jar random.jar nogui
-
-      - name: Keep workflow alive
-        if: always()
-        run: |
-          while true
-          do
-            sleep 300
-          done
